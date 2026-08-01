@@ -586,7 +586,7 @@ function App({ cfg, session }) {
         {tabAutorise === "echeancier" && <Echeancier data={data} />}
         {tabAutorise === "etats" && <EtatsDesLieux data={data} save={save} c={c} />}
         {tabAutorise === "baux" && <Baux data={data} save={save} />}
-        {tabAutorise === "cautions" && <Cautions data={data} save={save} />}
+        {tabAutorise === "cautions" && <Cautions data={data} save={save} moi={moi} />}
         {tabAutorise === "renouvellements" && <Renouvellements data={data} save={save} />}
         {tabAutorise === "factures" && <Factures data={data} save={save} />}
         {tabAutorise === "travaux" && <Travaux data={data} save={save} moi={moi} />}
@@ -1858,6 +1858,7 @@ function Recus({ data, save, moi }) {
             {!docVu.valide && peutValider && <Btn variant="accent" onClick={() => validerRecu(docVu)}>Valider le reçu</Btn>}
             {docVu.valide && peutValider && <Btn variant="ghost" onClick={() => rejeterRecu(docVu)}>Annuler validation</Btn>}
             <Btn variant="ghost" onClick={() => modifier(docVu)}>Modifier</Btn>
+            {docVu.valide && <>
             <Btn variant="ghost" onClick={() => genererPdf(document.getElementById("doc-recu"), docVu.numero + ".pdf")}>Télécharger PDF</Btn>
             <Btn variant="solid" onClick={() => window.print()}>Imprimer</Btn>
             <Btn variant="accent" onClick={async () => {
@@ -1875,15 +1876,21 @@ function Recus({ data, save, moi }) {
                 " d'un montant de " + fcfa(docVu.montant) + " (" + docVu.motif + ").\n\n" +
                 "Le document PDF est joint à ce message.\n\nCordialement,\n" + (P.societe || "Season Immobilier");
               ouvrirMail((loc || {}).email, sujet, corps);
-            }}>Email</Btn>
+            }}>Email</Btn></>}
           </>} />
         {!docVu.valide && !docVu.rejet && (
           <div className="mb-3 px-4 py-2.5 rounded text-sm font-semibold sans-impression garder-couleur" style={{ background: C.goldSoft, color: C.gold }}>
-            {peutValider ? "Ce reçu est en attente de validation. Cliquez sur « Valider le reçu » après vérification."
-              : "Ce reçu est en attente de validation par la gérante ou le comptable."}
+            {peutValider ? "Ce reçu est en attente de validation. Impression et envoi bloqués : cliquez sur « Valider le reçu » après vérification."
+              : "Ce reçu est en attente de validation par la gérante ou le comptable. Impression et envoi impossibles tant qu'il n'est pas validé."}
           </div>
         )}
         <div className="zone-impression" id="doc-recu" style={{ background: "#fff" }}>
+          {!docVu.valide && (
+            <div className="garder-couleur" style={{ background: "#7f1d1d", color: "#fff", padding: "10px 16px",
+              fontWeight: 700, fontSize: 13, letterSpacing: 1, textAlign: "center" }}>
+              DOCUMENT NON VALIDÉ — NE PAS REMETTRE AU CLIENT
+            </div>
+          )}
           <div className="p-2 sm:p-6"><DocumentRecu d={docVu} loc={loc} bien={bien} p={P} /></div>
         </div>
       </div>
@@ -2130,12 +2137,13 @@ function FacturesLoyer({ data, save, moi }) {
   const P = data.parametres || PARAMS_DEFAUT;
   const liste = data.facturesLoyer || [];
 
-  // Rôle : la gérante et le comptable peuvent émettre des factures définitives ; les commerciaux, seulement des proformas.
+  // Rôle : seule la gérante émet ou valide une facture définitive. Commerciaux et comptable préparent des proformas.
   const emailGerante = (P.gerante || "aude.nioble@season-immobilier.com").trim().toLowerCase();
   const emailsCommerciaux = (P.commerciaux || []).map((e) => String(e).trim().toLowerCase());
   const moiMin = String(moi || "").trim().toLowerCase();
   const estCommercial = emailsCommerciaux.includes(moiMin);
-  const peutValider = !estCommercial; // gérante + comptable (tout compte non commercial)
+  const suisGerante = moiMin === emailGerante;
+  const peutValider = suisGerante; // engagement lourd : gérante uniquement
 
   const blank = {
     type: "proforma", numero: "", bienId: "", locataireId: "", clientLibre: "",
@@ -2241,8 +2249,8 @@ function FacturesLoyer({ data, save, moi }) {
   };
 
   const emettre = () => {
-    // Un commercial ne peut émettre qu'une proforma, quel que soit le type sélectionné
-    const type = estCommercial ? "proforma" : f.type;
+    // Seule la gérante peut émettre directement une facture définitive
+    const type = suisGerante ? f.type : "proforma";
     const pro = type === "proforma";
 
     // Édition d'un document existant : on met à jour sans toucher aux compteurs ni au numéro
@@ -2265,8 +2273,21 @@ function FacturesLoyer({ data, save, moi }) {
     setVue(doc.id);
   };
 
+  const validerProforma = (d) => {
+    if (!peutValider) { alert("Seule la gérante peut valider une proforma."); return; }
+    save({ ...data, facturesLoyer: liste.map((x) => x.id === d.id
+      ? { ...x, proValidee: true, proValideePar: moi, proValideeLe: new Date().toISOString() } : x) },
+      "a validé la proforma " + d.numero + " (remise au client autorisée)");
+  };
+
+  const annulerValidationProforma = (d) => {
+    save({ ...data, facturesLoyer: liste.map((x) => x.id === d.id
+      ? { ...x, proValidee: false, proValideePar: null, proValideeLe: null } : x) },
+      "a annulé la validation de la proforma " + d.numero);
+  };
+
   const convertir = (d) => {
-    if (!peutValider) { alert("Seuls la gérante et le comptable peuvent convertir une proforma en facture définitive."); return; }
+    if (!peutValider) { alert("Seule la gérante peut convertir une proforma en facture définitive."); return; }
     const n = (data.compteurFac || 0) + 1;
     const an = new Date().getFullYear();
     const numero = "N°INV-SEASON-" + an + "-" + String(n).padStart(4, "0");
@@ -2307,6 +2328,11 @@ function FacturesLoyer({ data, save, moi }) {
         <Head title={docVu.type === "proforma" ? "Facture proforma" : "Facture"} sub={docVu.numero}
           action={<>
             {(docVu.type === "proforma" || peutValider) && <Btn variant="ghost" onClick={() => modifier(docVu)}>Modifier</Btn>}
+            {docVu.type === "proforma" && peutValider && !docVu.proValidee &&
+              <Btn variant="accent" onClick={() => validerProforma(docVu)}>Valider la proforma</Btn>}
+            {docVu.type === "proforma" && peutValider && docVu.proValidee &&
+              <Btn variant="ghost" onClick={() => annulerValidationProforma(docVu)}>Annuler validation</Btn>}
+            {(docVu.type !== "proforma" || docVu.proValidee) && <>
             <Btn variant="ghost" onClick={() => genererPdf(document.getElementById("doc-facture"), docVu.numero + ".pdf")}>Télécharger PDF</Btn>
             <Btn variant="solid" onClick={() => window.print()}>Imprimer</Btn>
             <Btn variant="accent" onClick={async () => {
@@ -2329,10 +2355,21 @@ function FacturesLoyer({ data, save, moi }) {
                 "\nMontant total : " + fcfa(total) + (docVu.echeance ? "\nÉchéance : " + dateLongue(docVu.echeance) : "") +
                 "\n\nLe document PDF est joint à ce message.\n\nCordialement,\n" + (P.societe || "Season Immobilier");
               ouvrirMail((loc || {}).email, sujet, corps);
-            }}>Email</Btn>
-            {docVu.type === "proforma" && peutValider && <Btn variant="accent" onClick={() => convertir(docVu)}>Valider en facture définitive</Btn>}
+            }}>Email</Btn></>}
+            {docVu.type === "proforma" && peutValider && docVu.proValidee && <Btn variant="accent" onClick={() => convertir(docVu)}>Convertir en facture définitive</Btn>}
             <Btn variant="accent" onClick={() => genererRecu(docVu)}>Générer le reçu</Btn>
           </>} />
+        {docVu.type === "proforma" && !docVu.proValidee && (
+          <div className="mb-3 px-4 py-2.5 rounded text-sm font-semibold sans-impression garder-couleur" style={{ background: C.goldSoft, color: C.gold }}>
+            {peutValider ? "Proforma en attente de validation. Impression et envoi bloqués : cliquez sur « Valider la proforma » après vérification."
+              : "Proforma en attente de validation par la gérante. Impression et envoi impossibles tant qu'elle n'est pas validée."}
+          </div>
+        )}
+        {docVu.type === "proforma" && docVu.proValidee && (
+          <div className="mb-3 px-4 py-2.5 rounded text-sm font-semibold sans-impression garder-couleur" style={{ background: C.greenSoft, color: C.green }}>
+            Proforma validée : elle peut être remise au client. Après encaissement, cliquez sur « Convertir en facture définitive ».
+          </div>
+        )}
         {infoRecu && (
           <div className="mb-4 px-4 py-2.5 rounded text-sm flex items-center justify-between gap-3 flex-wrap sans-impression"
             style={{ background: C.greenSoft, color: C.green }}>
@@ -2341,6 +2378,12 @@ function FacturesLoyer({ data, save, moi }) {
           </div>
         )}
         <div className="zone-impression" id="doc-facture" style={{ background: "#fff" }}>
+          {docVu.type === "proforma" && !docVu.proValidee && (
+            <div className="garder-couleur" style={{ background: "#7f1d1d", color: "#fff", padding: "10px 16px",
+              fontWeight: 700, fontSize: 13, letterSpacing: 1, textAlign: "center" }}>
+              PROFORMA NON VALIDÉE — NE PAS REMETTRE AU CLIENT
+            </div>
+          )}
           <div className="p-2 sm:p-6"><DocumentLoyer d={docVu} bien={bien} loc={loc} p={P} /></div>
         </div>
       </div>
@@ -2355,15 +2398,15 @@ function FacturesLoyer({ data, save, moi }) {
         action={<Btn variant="accent" onClick={ouvrirNouveau}>+ Nouvelle facture</Btn>} />
 
       {(() => {
-        const proformas = liste.filter((d) => d.type === "proforma");
+        const proformas = liste.filter((d) => d.type === "proforma" && !d.proValidee);
         if (proformas.length === 0) return null;
         return (
           <div className="mb-5 px-4 py-3 rounded flex items-center justify-between gap-3 flex-wrap sans-impression garder-couleur"
             style={{ background: peutValider ? C.goldSoft : "#F5F4EE", color: peutValider ? C.gold : C.mute }}>
             <span className="text-sm font-semibold">
               {peutValider
-                ? proformas.length + " proforma(s) à examiner. Ouvrez-en une pour la valider en facture définitive."
-                : proformas.length + " proforma(s) en attente de validation par la gérante ou le comptable."}
+                ? proformas.length + " proforma(s) à examiner. Ouvrez-en une pour la valider avant remise au client."
+                : proformas.length + " proforma(s) en attente de validation par la gérante."}
             </span>
           </div>
         );
@@ -2385,8 +2428,8 @@ function FacturesLoyer({ data, save, moi }) {
                   return (
                     <tr key={d.id}>
                       <td className="px-4 py-3 tabular-nums text-xs" style={{ color: C.ink }}>{d.numero}</td>
-                      <td className="px-4 py-3"><Tag tone={d.type === "proforma" ? "warn" : "ok"}>
-                        {d.type === "proforma" ? "Proforma" : "Facture"}</Tag></td>
+                      <td className="px-4 py-3"><Tag tone={d.type !== "proforma" ? "ok" : d.proValidee ? "neutral" : "warn"}>
+                        {d.type !== "proforma" ? "Facture" : d.proValidee ? "Proforma validée" : "Proforma à valider"}</Tag></td>
                       <td className="px-4 py-3" style={{ color: C.mute }}>{d.clientLibre || (l || {}).nom || "—"}</td>
                       <td className="px-4 py-3 text-xs max-w-[220px] truncate" style={{ color: C.mute }}>{d.objet || "—"}</td>
                       <td className="px-4 py-3 tabular-nums font-semibold" style={{ color: C.ink }}>{fcfa(tot)}</td>
@@ -2412,7 +2455,7 @@ function FacturesLoyer({ data, save, moi }) {
                         Facture proforma
                       </div>
                       <p className="text-[11px] mt-1" style={{ color: C.mute }}>
-                        En tant que commercial, vous préparez des proformas. La gérante ou le comptable les valident en factures définitives.
+                        Vous préparez des proformas. Seule la gérante les valide en factures définitives.
                       </p>
                     </div>
                   : <Select value={f.type} onChange={(e) => majType(e.target.value)}>
@@ -4201,12 +4244,15 @@ function ModelesBail({ data, save, retour }) {
 
 /* ============================== cautions ================================= */
 
-function Cautions({ data, save }) {
+function Cautions({ data, save, moi }) {
   const [open, setOpen] = useState(false);
   const [vue, setVue] = useState(null);
   const [filtre, setFiltre] = useState("actifs");
   const P = data.parametres || PARAMS_DEFAUT;
   const suivi = data.cautions || [];
+  // Engagement lourd : seule la gérante prononce une restitution de caution
+  const emailGerante = (P.gerante || "aude.nioble@season-immobilier.com").trim().toLowerCase();
+  const suisGerante = String(moi || "").trim().toLowerCase() === emailGerante;
 
   // Construit la liste : un item par locataire, en fusionnant avec le suivi existant
   const lignes = useMemo(() => {
@@ -4540,7 +4586,8 @@ function Cautions({ data, save }) {
 
             <div className="flex gap-2 pt-2 flex-wrap">
               <Btn variant="ghost" onClick={() => enregistrer(f.statut === "restituee" ? "restituee" : (data.locataires.find((l) => l.id === f.locataireId) || {}).actif === false ? "a_solder" : "en_cours")}>Enregistrer</Btn>
-              {f.statut !== "restituee" && <Btn variant="accent" onClick={() => enregistrer("restituee")}>Marquer restituée &amp; générer le reçu</Btn>}
+              {f.statut !== "restituee" && suisGerante && <Btn variant="accent" onClick={() => enregistrer("restituee")}>Marquer restituée &amp; générer le reçu</Btn>}
+              {f.statut !== "restituee" && !suisGerante && <span className="text-xs self-center" style={{ color: C.mute }}>La restitution de caution est prononcée par la gérante.</span>}
               <Btn variant="ghost" onClick={() => setOpen(false)}>Annuler</Btn>
             </div>
           </div>
@@ -5898,7 +5945,7 @@ function StudiosMeubles({ data, save, moi, c }) {
                     </div>
                     <div className="flex gap-3 flex-wrap sans-impression">
                       <button onClick={() => setFicheResa(r)} className="text-xs font-semibold" style={{ color: C.ink }}>Fiche signalétique</button>
-                      <button onClick={() => setFactureResa({ r, definitive: false })} className="text-xs font-semibold" style={{ color: C.green }}>Facture de réservation</button>
+                      {r.statut !== "a_valider" && r.statut !== "rejetee" && <button onClick={() => setFactureResa({ r, definitive: false })} className="text-xs font-semibold" style={{ color: C.green }}>Facture de réservation</button>}
                       {r.statut === "payee" && <button onClick={() => setFactureResa({ r, definitive: true })} className="text-xs font-semibold" style={{ color: C.green }}>Facture définitive</button>}
                       <button onClick={() => majDepassement(r)} className="text-xs font-semibold" style={{ color: C.orange }}>Dépassement (sortie &gt; 13h)</button>
                       {r.statut === "a_valider" && suisGerante && <button onClick={() => validerResa(r)} className="text-xs font-semibold" style={{ color: C.green }}>Valider</button>}
