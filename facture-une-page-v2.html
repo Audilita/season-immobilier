@@ -1,0 +1,242 @@
+<!--
+========================================================================
+  FACTURE SUR UNE SEULE PAGE A4 — VERSION 2 (CORRIGÉE)
+  Season Immobilier
+
+  Correction : la version 1 utilisait visibility:hidden, qui rend
+  l'interface invisible mais lui laisse sa place — d'où l'espace vide
+  en haut et le débordement sur une 2e feuille.
+
+  Cette version extrait la facture dans un conteneur dédié placé
+  directement sous <body>. Plus rien ne l'entoure, donc plus aucun
+  espace parasite.
+========================================================================
+
+  ÉTAPE 1 : REMPLACER intégralement le bloc <style> de la version 1
+  ÉTAPE 2 : REMPLACER intégralement le bloc <script> de la version 1
+  ÉTAPE 3 : la classe "facture-a4" reste sur le conteneur de la facture
+            (inchangé par rapport à la version 1)
+
+========================================================================
+-->
+
+
+<!-- ============ ÉTAPE 1 : à coller avant </head> ============ -->
+
+<style>
+  /* Le conteneur d'impression n'existe qu'au moment d'imprimer */
+  #zone-impression { display: none; }
+
+  @media print {
+
+    @page {
+      size: A4 portrait;
+      margin: 8mm;
+    }
+
+    /* Neutralise les marges par défaut du navigateur */
+    html, body {
+      margin: 0 !important;
+      padding: 0 !important;
+      height: auto !important;
+      background: #fff !important;
+    }
+
+    /* CLÉ DE LA CORRECTION :
+       tous les enfants directs de body disparaissent RÉELLEMENT
+       (display:none, pas visibility:hidden), sauf la zone d'impression.
+       Aucun élément ne conserve donc sa place. */
+    body.mode-impression > * {
+      display: none !important;
+    }
+    body.mode-impression > #zone-impression {
+      display: block !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+    }
+
+    /* La facture elle-même : flux normal, collée en haut */
+    #zone-impression .facture-a4 {
+      position: static !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      max-width: none !important;
+      min-height: 0 !important;
+      border: none !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      background: #fff !important;
+      color: #000 !important;
+      font-size: 10.5pt !important;
+      line-height: 1.25 !important;
+      transform-origin: top left;
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+
+    /* Le tout premier élément ne doit avoir aucune marge haute :
+       c'est la cause la plus fréquente d'espace vide résiduel */
+    #zone-impression .facture-a4 > *:first-child {
+      margin-top: 0 !important;
+      padding-top: 0 !important;
+    }
+
+    #zone-impression .facture-a4 * {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+      overflow: visible !important;
+      max-height: none !important;
+      min-height: 0 !important;
+    }
+
+    /* Rien de superflu n'est imprimé */
+    #zone-impression .no-print,
+    #zone-impression button,
+    #zone-impression nav,
+    #zone-impression input[type="button"],
+    #zone-impression input[type="submit"] {
+      display: none !important;
+    }
+
+    /* Compactage typographique */
+    #zone-impression h1 { font-size: 15pt !important; margin: 0 0 4px 0 !important; }
+    #zone-impression h2 { font-size: 12pt !important; margin: 0 0 3px 0 !important; }
+    #zone-impression h3 { font-size: 11pt !important; margin: 0 0 3px 0 !important; }
+    #zone-impression p  { margin: 0 0 3px 0 !important; }
+
+    #zone-impression table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      font-size: 9.5pt !important;
+      margin: 4px 0 !important;
+    }
+    #zone-impression th,
+    #zone-impression td {
+      padding: 3px 5px !important;
+      border: 0.5pt solid #999 !important;
+    }
+
+    #zone-impression img {
+      max-height: 55px !important;
+      width: auto !important;
+    }
+
+    /* Neutralise les hauteurs et espacements imposés par Tailwind */
+    #zone-impression [class*="min-h-"] { min-height: 0 !important; }
+    #zone-impression [class*="h-screen"] { height: auto !important; }
+
+    /* Impression des fonds de couleur */
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+  }
+
+  .mention-facultative { }
+</style>
+
+
+<!-- ============ ÉTAPE 2 : à coller avant </body> ============ -->
+
+<script>
+(function () {
+
+  var HAUTEUR_UTILE_A4 = 1062;  // 297mm - 16mm de marges, à 96 dpi
+  var ECHELLE_MINI     = 0.55;
+
+  function preparerImpression() {
+    var source = document.querySelector('.facture-a4');
+    if (!source) return;
+
+    nettoyer();
+
+    // On duplique la facture dans un conteneur autonome sous <body>.
+    // L'original reste intact à l'écran.
+    var zone = document.createElement('div');
+    zone.id = 'zone-impression';
+
+    var copie = source.cloneNode(true);
+    copie.style.zoom = '';
+    copie.style.transform = '';
+    zone.appendChild(copie);
+    document.body.appendChild(zone);
+    document.body.classList.add('mode-impression');
+
+    // Mesure puis ajustement, une fois la copie dans le DOM
+    var hauteur = copie.scrollHeight;
+
+    if (hauteur > HAUTEUR_UTILE_A4) {
+      var facultatives = copie.querySelectorAll('.mention-facultative');
+      for (var i = 0; i < facultatives.length; i++) {
+        facultatives[i].style.display = 'none';
+      }
+      hauteur = copie.scrollHeight;
+    }
+
+    if (hauteur > HAUTEUR_UTILE_A4) {
+      var echelle = Math.max(ECHELLE_MINI, (HAUTEUR_UTILE_A4 / hauteur) * 0.98);
+      copie.style.zoom = echelle;
+      if (!copie.style.zoom) {  // repli Firefox
+        copie.style.transform = 'scale(' + echelle + ')';
+        copie.style.transformOrigin = 'top left';
+        copie.style.width = (100 / echelle) + '%';
+      }
+    }
+  }
+
+  function nettoyer() {
+    document.body.classList.remove('mode-impression');
+    var ancienne = document.getElementById('zone-impression');
+    if (ancienne) ancienne.remove();
+  }
+
+  window.addEventListener('beforeprint', preparerImpression);
+  window.addEventListener('afterprint', nettoyer);
+
+  // Safari n'émet pas toujours beforeprint
+  if (window.matchMedia) {
+    var mq = window.matchMedia('print');
+    var handler = function (e) { e.matches ? preparerImpression() : nettoyer(); };
+    if (mq.addEventListener)      mq.addEventListener('change', handler);
+    else if (mq.addListener)      mq.addListener(handler);
+  }
+
+  // À appeler depuis le bouton Imprimer / Télécharger PDF
+  window.imprimerFacture = function () {
+    preparerImpression();
+    setTimeout(function () {
+      window.print();
+      setTimeout(nettoyer, 800);
+    }, 150);
+  };
+
+})();
+</script>
+
+
+<!--
+========================================================================
+  SI L'ESPACE VIDE PERSISTE — LES 3 AUTRES CAUSES POSSIBLES
+========================================================================
+
+  1. UN CONTENEUR PARENT AVEC POSITION:RELATIVE
+     Si .facture-a4 est dans un modal ou un panneau positionné,
+     la copie hérite parfois de styles inline. Vérifiez qu'aucun
+     style={{ marginTop: ... }} ou style={{ paddingTop: ... }}
+     n'est écrit en dur sur le conteneur de la facture.
+
+  2. UNE MARGE SUR LE PREMIER ENFANT (cause la plus fréquente)
+     Un <div className="pt-8"> ou <h1 className="mt-6"> en tête de
+     facture crée un vide de 2 à 3 cm. Le CSS ci-dessus le neutralise
+     déjà, mais si le vide fait plus de 4 cm, cherchez un
+     <div className="h-32"> ou un espaceur volontaire à supprimer.
+
+  3. L'EN-TÊTE ET LE PIED DE PAGE DU NAVIGATEUR
+     Dans la boîte d'impression Chrome : Plus de paramètres →
+     décocher "En-têtes et pieds de page". Cela libère environ 2 cm
+     en haut et en bas, ce qui suffit souvent à lui seul.
+
+========================================================================
+-->
